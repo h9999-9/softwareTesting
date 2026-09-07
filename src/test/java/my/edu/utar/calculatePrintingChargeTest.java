@@ -1,117 +1,256 @@
 package my.edu.utar;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import junitparams.JUnitParamsRunner;
-import junitparams.Parameters;
 
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
+import junitparams.JUnitParamsRunner;
+
 
 @RunWith(JUnitParamsRunner.class)
 public class calculatePrintingChargeTest {
 
-    private calculatePrintingCharge calculator;
-    private applyDiscount mockDiscount;
+    private static final double DELTA = 0.001;
+
     private printerAvailability mockPrinter;
+    private calculatePrintingCharge calc;
+
+    private customer student;     // C001, Student, 10 previous orders
+    private customer corporate;   // C002, Corporate, 25 previous orders
+    private customer other;       // C003, Other, 5 previous orders
 
     @Before
     public void setUp() {
-        // Initialize the mocks
         mockPrinter = mock(printerAvailability.class);
-        mockDiscount = mock(applyDiscount.class);
-        
-        // Inject mocks into the class under test
-        calculator = new calculatePrintingCharge(mockPrinter, mockDiscount);
+        calc = new calculatePrintingCharge(mockPrinter, new applyDiscount());
+
+        student   = new customer("C001", "Ali Bin Ahmad", "ali@gmail.com",
+                                 "0123456789", customer.TYPE_STUDENT, 10);
+        corporate = new customer("C002", "Tan Wei Ming", "tanwm@printcorp.com",
+                                 "0129876543", customer.TYPE_CORPORATE, 25);
+        other     = new customer("C003", "Siti Aminah", "siti.aminah@gmail.com",
+                                 "0111234567", customer.TYPE_OTHER, 5);
     }
 
-    // ==========================================
-    // 1. BASE CHARGE TESTS (From Partition Table 3)
-    // ==========================================
+    // ------------------------------------------------------------------
+    // TC#1 - DT#1 Rule 1: the complete flow for an existing student
+    // ------------------------------------------------------------------
     @Test
-    @Parameters({
-        "A4, Black & White, Single-sided, 10, 2, 4.00",    // Valid EP
-        "A3, Colour, Double-sided, 5, 10, 70.00",          // Valid EP
-        "A5, Black & White, Double-sided, 50, 5, 32.50",   // Valid EP
-        "A4, Colour, Double-sided, 500, 1000, 375000.00"   // Valid BVA Maximum
-    })
-    public void testCalculateBaseCharge_ValidInputs(String size, String type, String side, int pages, int copies, double expected) {
-        double actual = calculator.calculateBaseCharge(size, type, side, pages, copies);
-        assertEquals(expected, actual, 0.01);
+    public void TC1_fullCalculationForAnExistingStudent() {
+        when(mockPrinter.isPrinterAvailable("A4", "Colour")).thenReturn(true);
+
+        printOrder order = printOrder.createOrder(student, "Colour", "A4", "Single-sided",
+                                                  100, 5, "Comb", false, false);
+        double total = calc.calculateTotalCharge(order);
+
+        assertEquals(346.28, total, DELTA);
+        assertEquals(400.00, order.getBaseCharge(), DELTA);
+        assertEquals(5.00,   order.getOptionalServiceCharge(), DELTA);
+        assertEquals(405.00, order.getSubtotal(), DELTA);
+        assertEquals(58.72,  order.getDiscountAmount(), DELTA);
+        assertEquals(346.28, order.getTotalCharge(), DELTA);
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    @Parameters({
-        "A4, Colour, Single-sided, 0, 1",        // Invalid Low BVA Pages
-        "A3, Black & White, Single-sided, 1, 1001", // Invalid High BVA Copies
-        "A6, Black & White, Single-sided, 10, 1",   // Invalid EP Paper Size
-        "A4, Blue, Single-sided, 10, 1"             // Invalid EP Print Type
-    })
-    public void testCalculateBaseCharge_InvalidInputs(String size, String type, String side, int pages, int copies) {
-        calculator.calculateBaseCharge(size, type, side, pages, copies);
-    }
-
-    // ==========================================
-    // 2. OPTIONAL SERVICE TESTS (From Partition Table 5 & 6)
-    // ==========================================
+    // ------------------------------------------------------------------
+    // TC#2 - DT#1 Rule 2: a newly registered customer receives no discount
+    // ------------------------------------------------------------------
     @Test
-    @Parameters({
-        "none, false, false, 20, 0.00",         // No options
-        "Staple, false, false, 20, 2.00",       // Single option
-        "Comb, true, true, 50, 100.00",         // Multiple options
-        "Spiral, true, false, 500000, 750008.00" // BVA Lamination Max (500*1000)
-    })
-    public void testCalculateOptionalCharge_ValidInputs(String binding, boolean lamination, boolean express, int totalPages, double expected) {
-        double actual = calculator.calculateOptionalServiceCharge(binding, lamination, express, totalPages);
-        assertEquals(expected, actual, 0.01);
+    public void TC2_flowForANewlyRegisteredCustomer() {
+        when(mockPrinter.isPrinterAvailable("A4", "Black & White")).thenReturn(true);
+
+        customer newCustomer = new customer("C006", "Siti Nurhaliza", "siti@gmail.com",
+                                            "0198765432", customer.TYPE_OTHER);
+        printOrder order = printOrder.createOrder(newCustomer, "Black & White", "A4",
+                                                  "Single-sided", 10, 1, "None", false, false);
+
+        assertEquals(2.00, calc.calculateTotalCharge(order), DELTA);
+        assertEquals(0.00, order.getDiscountAmount(), DELTA);
     }
 
-    @Test(expected = IllegalArgumentException.class)
-    public void testCalculateOptionalCharge_InvalidBinding() {
-        // Tests the exception when an invalid string is passed
-        calculator.calculateOptionalServiceCharge("Hardcover", false, false, 10);
-    }
-
-    // ==========================================
-    // 3. INTEGRATION / TOTAL CHARGE TESTS
-    // ==========================================
+    // ------------------------------------------------------------------
+    // TC#3 - DT#1 Rule 7: no optional services still completes
+    // ------------------------------------------------------------------
     @Test
-    public void testCalculateTotalCharge_PrinterAvailable_Success() {
-        // Arrange
-        customer dummyCustomer = new customer("C001", "John", "john@email.com", "012-3456789", "Student");
-        printOrder dummyOrder = new printOrder(dummyCustomer, "Colour", "A3", "Double-sided", 50, 2, "Spiral", true, false);
-        
-        // Mock the printer to say YES
+    public void TC3_orderWithNoOptionalServicesCompletes() {
+        when(mockPrinter.isPrinterAvailable("A5", "Black & White")).thenReturn(true);
+
+        printOrder order = printOrder.createOrder(other, "Black & White", "A5",
+                                                  "Single-sided", 10, 1, "None", false, false);
+
+        assertEquals(1.50, calc.calculateTotalCharge(order), DELTA);
+        assertEquals(0.00, order.getOptionalServiceCharge(), DELTA);
+        assertEquals(true, order.isChargesCalculated());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#4 - the maximum charge, all optional services and all discounts
+    // ------------------------------------------------------------------
+    @Test
+    public void TC4_maximumChargeWithAllOptionalServices() {
         when(mockPrinter.isPrinterAvailable("A3", "Colour")).thenReturn(true);
-        
-        // Mock the discount calculator to return a specific amount (RM 29.80 discount)
-        // Note: Subtotal of this order is RM 298.00
-        when(mockDiscount.calculateDiscount(eq("Student"), anyDouble(), eq(5))).thenReturn(29.80);
 
-        // Act
-        double finalCharge = calculator.calculateTotalCharge(dummyOrder, 5);
+        printOrder order = printOrder.createOrder(corporate, "Colour", "A3", "Double-sided",
+                                                  100, 2, "Spiral", true, true);
+        double total = calc.calculateTotalCharge(order);
 
-        // Assert
-        assertEquals(268.20, finalCharge, 0.01); // 298.00 - 29.80
-        
-        // Verify interactions
-        verify(mockPrinter, times(1)).isPrinterAvailable("A3", "Colour");
-        verify(mockDiscount, times(1)).calculateDiscount("Student", 298.00, 5);
+        assertEquals(280.00, order.getBaseCharge(), DELTA);
+        assertEquals(328.00, order.getOptionalServiceCharge(), DELTA);
+        assertEquals(608.00, order.getSubtotal(), DELTA);
+        assertEquals(141.59, order.getDiscountAmount(), DELTA);
+        assertEquals(466.41, total, DELTA);
     }
 
-    @Test(expected = IllegalStateException.class)
-    public void testCalculateTotalCharge_PrinterUnavailable_ThrowsException() {
-        // Arrange
-        customer dummyCustomer = new customer("C002", "Jane", "jane@email.com", "012-3456789", "Regular");
-        printOrder dummyOrder = new printOrder(dummyCustomer, "Black & White", "A4", "Single-sided", 10, 1, "none", false, false);
-        
-        // Mock the printer to say NO
-        when(mockPrinter.isPrinterAvailable("A4", "Black & White")).thenReturn(false);
+    // ------------------------------------------------------------------
+    // TC#5 - DT#1 Rule 8 / Appendix A: the printer is unavailable
+    // ------------------------------------------------------------------
+    @Test
+    public void TC5_orderTerminatesWhenThePrinterIsUnavailable() {
+        when(mockPrinter.isPrinterAvailable("A3", "Colour")).thenReturn(false);
 
-        // Act
-        calculator.calculateTotalCharge(dummyOrder, 0);
-        
-        // (Execution stops here due to Exception, so we don't need Assert)
+        printOrder order = printOrder.createOrder(student, "Colour", "A3", "Single-sided",
+                                                  10, 1, "None", false, false);
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+            () -> calc.calculateTotalCharge(order));
+
+        assertEquals("Selected printer is currently unavailable.", e.getMessage());
+        assertFalse(order.isChargesCalculated());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#6 - the module is called once, with the arguments unchanged
+    // ------------------------------------------------------------------
+    @Test
+    public void TC6_printerModuleCalledOnceWithCorrectArguments() {
+        when(mockPrinter.isPrinterAvailable("A4", "Colour")).thenReturn(true);
+
+        printOrder order = printOrder.createOrder(other, "Colour", "A4", "Single-sided",
+                                                  10, 1, "None", false, false);
+        calc.calculateTotalCharge(order);
+
+        verify(mockPrinter, times(1)).isPrinterAvailable("A4", "Colour");
+    }
+
+    // ------------------------------------------------------------------
+    // TC#7 - nothing is stored on the order when the printer is unavailable
+    // ------------------------------------------------------------------
+    @Test
+    public void TC7_noChargeIsStoredWhenThePrinterIsUnavailable() {
+        when(mockPrinter.isPrinterAvailable(anyString(), anyString())).thenReturn(false);
+
+        printOrder order = printOrder.createOrder(student, "Colour", "A4", "Single-sided",
+                                                  10, 1, "None", false, false);
+
+        assertThrows(IllegalStateException.class, () -> calc.calculateTotalCharge(order));
+
+        assertEquals(0.00, order.getTotalCharge(), DELTA);
+        assertEquals(0.00, order.getBaseCharge(), DELTA);
+        assertFalse(order.isChargesCalculated());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#8 - the module is NOT called when validation fails
+    // ------------------------------------------------------------------
+    @Test
+    public void TC8_printerModuleIsNotCalledWhenValidationFails() {
+        printOrder mockOrder = mock(printOrder.class);
+        when(mockOrder.getCustomerDetails()).thenReturn(student);
+        when(mockOrder.getNumberOfPages()).thenReturn(0);      
+        when(mockOrder.getNumberOfCopies()).thenReturn(1);
+        when(mockOrder.getPaperSize()).thenReturn("A4");
+        when(mockOrder.getPrintType()).thenReturn("Colour");
+        when(mockOrder.getPrintingSide()).thenReturn("Single-sided");
+        when(mockOrder.getBindingOption()).thenReturn("None");
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> calc.calculateTotalCharge(mockOrder));
+
+        assertEquals("Pages must be between 1 and 500.", e.getMessage());
+        verify(mockPrinter, never()).isPrinterAvailable(anyString(), anyString());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#9 - DT#1 Rule 3: a missing print type
+    // ------------------------------------------------------------------
+    @Test
+    public void TC9_missingPrintTypeIsRejected() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> calc.calculateBaseCharge("A4", null, "Single-sided", 10, 1));
+        assertEquals("Print type must be selected.", e.getMessage());
+        verify(mockPrinter, never()).isPrinterAvailable(anyString(), anyString());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#10 - DT#1 Rule 4: a missing paper size
+    // ------------------------------------------------------------------
+    @Test
+    public void TC10_missingPaperSizeIsRejected() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> calc.calculateBaseCharge(null, "Colour", "Single-sided", 10, 1));
+        assertEquals("Paper size must be selected.", e.getMessage());
+        verify(mockPrinter, never()).isPrinterAvailable(anyString(), anyString());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#11 - DT#1 Rule 5: an out of range page count
+    // ------------------------------------------------------------------
+    @Test
+    public void TC11_invalidPagesOrCopiesIsRejected() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> calc.calculateBaseCharge("A4", "Colour", "Single-sided", 501, 1));
+        assertEquals("Pages must be between 1 and 500.", e.getMessage());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#12 - DT#1 Rule 6: a missing printing side
+    // ------------------------------------------------------------------
+    @Test
+    public void TC12_missingPrintingSideIsRejected() {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+            () -> calc.calculateBaseCharge("A4", "Colour", null, 10, 1));
+        assertEquals("Printing side must be selected.", e.getMessage());
+    }
+
+    // ------------------------------------------------------------------
+    // TC#13 - Business Rule 5: the final total is rounded to two decimals
+    // ------------------------------------------------------------------
+    @Test
+    public void TC13_finalTotalIsRoundedToTwoDecimalPlaces() {
+        when(mockPrinter.isPrinterAvailable("A4", "Colour")).thenReturn(true);
+
+        printOrder order = printOrder.createOrder(student, "Colour", "A4", "Single-sided",
+                                                  100, 5, "Comb", false, false);
+        double total = calc.calculateTotalCharge(order);
+
+        assertEquals(346.28, total, DELTA);
+        // the printed breakdown must balance
+        assertEquals(order.getTotalCharge(),
+                     order.getBaseCharge() + order.getOptionalServiceCharge()
+                         - order.getDiscountAmount(),
+                     DELTA);
+    }
+
+    // ------------------------------------------------------------------
+    // TC#14 - the constructor rejects a null dependency
+    // ------------------------------------------------------------------
+    @Test
+    public void TC14_constructorRejectsNullDependencies() {
+        assertEquals("Printer availability service must not be null.",
+            assertThrows(IllegalArgumentException.class,
+                () -> new calculatePrintingCharge(null, new applyDiscount())).getMessage());
+
+        assertEquals("Discount calculator must not be null.",
+            assertThrows(IllegalArgumentException.class,
+                () -> new calculatePrintingCharge(mockPrinter, null)).getMessage());
     }
 }

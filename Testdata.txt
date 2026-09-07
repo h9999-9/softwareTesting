@@ -1,0 +1,5 @@
+# customerID,paperSize,printType,printingSide,pages,copies,binding,lamination,express,expectedTotal
+C001,A4,Colour,Single-sided,100,5,Comb,false,false,346.28
+C002,A3,Colour,Double-sided,100,2,Spiral,true,true,466.41
+C003,A5,Black & White,Single-sided,10,1,None,false,false,1.50
+C005,A4,Black & White,Single-sided,10,2,None,false,false,3.40

@@ -1,1 +1,5 @@
-C001,John Doe,john@email.com,012345678,Student
+C001,Ali Bin Ahmad,ali@gmail.com,0123456789,Student,10
+C002,Tan Wei Ming,tanwm@printcorp.com,0129876543,Corporate,25
+C003,Siti Aminah,siti.aminah@gmail.com,0111234567,Other,5
+C004,Rajesh Kumar,rajesh@yahoo.com,01123456789,Student,25
+C005,Lim Mei Ling,meiling@hotmail.com,0198765432,Corporate,3
